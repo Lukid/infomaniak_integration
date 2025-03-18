@@ -1,4 +1,4 @@
-from typing import List, Optional, Type
+from typing import List, Optional, Type, Any, Mapping
 from cat.mad_hatter.decorators import tool, hook, plugin
 from pydantic import BaseModel, ConfigDict, SecretStr
 from datetime import datetime, date
@@ -7,8 +7,9 @@ from langchain.chat_models.base import BaseChatModel
 from langchain.schema import BaseMessage, ChatMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.messages import AIMessage
+from langchain.embeddings.base import Embeddings
 import requests
-from typing import Any, List, Mapping, Optional
+import numpy as np
 
 class InfomaniakChatModel(BaseChatModel):
     """Infomaniak Chat model."""
@@ -123,7 +124,72 @@ class InfomaniakConfig(LLMSettings):
         }
     )
 
+class InfomaniakEmbeddings(Embeddings):
+    """Infomaniak Embeddings model."""
+    
+    api_key: str
+    product_id: str
+    model: str = "bge_multilingual_gemma2"  # Default model for embeddings
+    base_url: str = "https://api.infomaniak.com/1/ai"
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """Embed a list of documents."""
+        embeddings = []
+        for text in texts:
+            embedding = self.embed_query(text)
+            embeddings.append(embedding)
+        return embeddings
+
+    def embed_query(self, text: str) -> List[float]:
+        """Embed a query."""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        url = f"{self.base_url}/{self.product_id}/openai/v1/embeddings"
+        
+        try:
+            response = requests.post(
+                url,
+                json={
+                    "input": text,
+                    "model": self.model
+                },
+                headers=headers
+            )
+            
+            if response.status_code != 200:
+                raise ValueError(f"API returned status code {response.status_code}: {response.text}")
+            
+            response_json = response.json()
+            return response_json['data'][0]['embedding']
+            
+        except Exception as e:
+            raise ValueError(f"Error calling Infomaniak Embeddings API: {str(e)}")
+
+class InfomaniakEmbeddingsConfig(BaseModel):
+    """Configuration for Infomaniak Embeddings."""
+    api_key: SecretStr
+    product_id: str
+    model: str = "bge_multilingual_gemma2"
+    base_url: str = "https://api.infomaniak.com/1/ai"
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "humanReadableName": "Infomaniak Embeddings",
+            "description": "Configuration for Infomaniak AI embeddings models",
+            "link": "https://www.infomaniak.com/en/ai",
+        }
+    )
+
 @hook
 def factory_allowed_llms(allowed, cat) -> List:
     allowed.append(InfomaniakConfig)
+    return allowed
+
+@hook
+def factory_allowed_embedders(allowed, cat) -> List:
+    """Add Infomaniak embeddings to allowed embedders."""
+    allowed.append(InfomaniakEmbeddingsConfig)
     return allowed 

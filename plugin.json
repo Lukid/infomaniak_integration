@@ -1,6 +1,6 @@
 {
     "name": "Infomaniak AI",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "description": "Integration of Infomaniak AI - the Swiss cloud provider's AI service - infomaniak.com/ai",
     "author_name": "lucabaroncini",
     "plugin_url": "https://github.com/lucabaroncini/infomaniak-integration",
