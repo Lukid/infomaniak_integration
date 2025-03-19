@@ -3,6 +3,7 @@ from cat.mad_hatter.decorators import tool, hook, plugin
 from pydantic import BaseModel, ConfigDict, SecretStr
 from datetime import datetime, date
 from cat.factory.llm import LLMSettings
+from cat.factory.embedder import EmbedderSettings
 from langchain.chat_models.base import BaseChatModel
 from langchain.schema import BaseMessage, ChatMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -10,6 +11,9 @@ from langchain_core.messages import AIMessage
 from langchain.embeddings.base import Embeddings
 import requests
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 class InfomaniakChatModel(BaseChatModel):
     """Infomaniak Chat model."""
@@ -134,14 +138,45 @@ class InfomaniakEmbeddings(Embeddings):
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """Embed a list of documents."""
-        embeddings = []
+        # Ensure all texts are strings and handle None or invalid types
+        processed_texts = []
         for text in texts:
-            embedding = self.embed_query(text)
-            embeddings.append(embedding)
+            if isinstance(text, (str, bytes)):
+                processed_texts.append(str(text))
+            elif hasattr(text, 'page_content'):
+                # Handle Document objects
+                processed_texts.append(str(text.page_content))
+            elif text is None:
+                processed_texts.append("")
+            else:
+                # Try to convert anything else to string
+                try:
+                    processed_texts.append(str(text))
+                except Exception:
+                    processed_texts.append("")
+        
+        embeddings = []
+        for text in processed_texts:
+            try:
+                embedding = self.embed_query(text)
+                embeddings.append(embedding)
+            except Exception as e:
+                # Log the error but don't fail completely
+                print(f"Error embedding text: {str(e)}")
+                # Return a zero vector of appropriate size (you might want to adjust this)
+                embeddings.append([0.0] * 1536)  # Assuming 1536 dimensions for the embedding
+        
         return embeddings
 
     def embed_query(self, text: str) -> List[float]:
         """Embed a query."""
+        # Ensure text is a string
+        if not isinstance(text, str):
+            if hasattr(text, 'page_content'):
+                text = str(text.page_content)
+            else:
+                text = str(text) if text is not None else ""
+        
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -168,12 +203,28 @@ class InfomaniakEmbeddings(Embeddings):
         except Exception as e:
             raise ValueError(f"Error calling Infomaniak Embeddings API: {str(e)}")
 
-class InfomaniakEmbeddingsConfig(BaseModel):
+class InfomaniakEmbeddingsConfig(EmbedderSettings):
     """Configuration for Infomaniak Embeddings."""
     api_key: SecretStr
     product_id: str
     model: str = "bge_multilingual_gemma2"
     base_url: str = "https://api.infomaniak.com/1/ai"
+    
+    _pyclass: Type = InfomaniakEmbeddings
+
+    @classmethod
+    def get_embedder_from_config(cls, config):
+        """Create an embedder instance from the configuration."""
+        if cls._pyclass is None:
+            raise Exception(
+                "Embedder configuration class has self._pyclass==None. Should be a valid Embedder class"
+            )
+        
+        # Convert SecretStr to str for the API key
+        config_dict = config.copy()
+        config_dict["api_key"] = config_dict["api_key"].get_secret_value()
+        
+        return cls._pyclass(**config_dict)
 
     model_config = ConfigDict(
         json_schema_extra={
